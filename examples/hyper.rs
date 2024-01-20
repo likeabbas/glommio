@@ -20,6 +20,8 @@ mod hyper_compat {
     };
     use hyper::{server::conn::Http, Body, Request, Response};
     use std::{io, rc::Rc};
+    use std::collections::HashMap;
+    use sys_info::HashMap;
     use tokio::io::ReadBuf;
 
     #[derive(Clone)]
@@ -75,6 +77,8 @@ mod hyper_compat {
         addr: A,
         service: S,
         max_connections: usize,
+        mut hash_map: Rc<HashMap<usize, i64>>,
+        id: usize
     ) -> io::Result<()>
     where
         S: FnMut(Request<Body>) -> F + 'static + Copy,
@@ -90,6 +94,8 @@ mod hyper_compat {
                     return Err(x.into());
                 }
                 Ok(stream) => {
+                    *hash_map.entry(id).or_insert(0) += 1;
+                    println!("{:?}", hash_map.get(&id));
                     let addr = stream.local_addr().unwrap();
                     glommio::spawn_local(enclose!{(conn_control) async move {
                         let _permit = conn_control.acquire_permit(1).await;
@@ -105,9 +111,12 @@ mod hyper_compat {
     }
 }
 
+use std::collections::HashMap;
 use glommio::{CpuSet, LocalExecutorPoolBuilder, PoolPlacement};
 use hyper::{Body, Method, Request, Response, StatusCode};
 use std::convert::Infallible;
+use std::rc::Rc;
+use sys_info::HashMap;
 
 async fn hyper_demo(req: Request<Body>) -> Result<Response<Body>, Infallible> {
     match (req.method(), req.uri().path()) {
@@ -133,7 +142,7 @@ fn main() {
     .on_all_shards(|| async move {
         let id = glommio::executor().id();
         println!("Starting executor {id}");
-        hyper_compat::serve_http(([0, 0, 0, 0], 8000), hyper_demo, 1024)
+        hyper_compat::serve_http(([0, 0, 0, 0], 8000), hyper_demo, 1024, Rc::new(HashMap::new()), id)
             .await
             .unwrap();
     })
